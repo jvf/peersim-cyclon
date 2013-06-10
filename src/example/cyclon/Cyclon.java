@@ -1,306 +1,204 @@
 package example.cyclon;
 
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 import peersim.cdsim.CDProtocol;
 import peersim.config.Configuration;
-import peersim.core.CommonState;
+import peersim.core.Cleanable;
+import peersim.core.GeneralNode;
 import peersim.core.Linkable;
 import peersim.core.Node;
-import peersim.edsim.EDProtocol;
-import peersim.transport.Transport;
 
-public class Cyclon implements Linkable, EDProtocol, CDProtocol
-{
-	private static final String PAR_CACHE = "cache";
-	private static final String PAR_L = "l";
-	private static final String PAR_TRANSPORT = "transport";
-	private static final long TIMEOUT = 2000;
+/**
+ * @author Jens V. Fischer
+ */
+public class Cyclon implements CDProtocol, Linkable, Cloneable, Cleanable {
 
-	private final int size;
-	private final int l;
-	private final int tid;
+	private static final String PAR_CACHESIZE = "cache";
+	private static final String PAR_SHUFFLELENGHT = "shufflelength";
 
-	private List<CyclonEntry> cache = null;
+	private final int cacheSize;
+	private final int shufflelenght;
 
-	public Cyclon(String n)
-	{
-		this.size = Configuration.getInt(n + "." + PAR_CACHE);
-		this.l = Configuration.getInt(n + "." + PAR_L);
-		this.tid = Configuration.getPid(n + "." + PAR_TRANSPORT);
+	private ArrayList<CyclonEntry> cache;
+	private CyclonEntry maxAgeEntry;
 
-		cache = new ArrayList<CyclonEntry>(size);
+	public Cyclon(String prefix) {
+		this.cacheSize = Configuration.getInt(prefix + "." + PAR_CACHESIZE, 20);
+		this.shufflelenght = Configuration.getInt(prefix + "." + PAR_SHUFFLELENGHT, 20);
+		cache = new ArrayList<CyclonEntry>(20);
 	}
 
-	//-------------------------------------------------------------------
-	private void increaseAgeAndSort()
-	{
-		//for (CyclonEntry ce : cache)
-		//	ce.increase();
-
-		Collections.sort(cache, new CyclonEntry());
-	}
-
-	private CyclonEntry selectNeighbor()
-	{
-		try{			
-			int i = cache.size()-1;
-
-			if (cache.get(i).removed && (CommonState.getTime() - cache.get(i).timeRemoved) >= TIMEOUT){
-				cache.remove(i);
-				i--;
-			}
-
-			while (cache.get(i).removed)
-				i--;
-			
-			return cache.get(i);
-			//return cache.get(CommonState.r.nextInt(cache.size()));
-		} catch (Exception e){
-			return null;
-		}
-	}
-
-	private List<CyclonEntry> selectNeighbors(int l, Node rnode, boolean selectedAtRequest)
-	{
-		int dim = Math.min(l, cache.size()-1);
-		List<CyclonEntry> list = new ArrayList<CyclonEntry>(dim);
-
-		List<Integer> tmp = new ArrayList<Integer>();
-		for (int i = 0; i < cache.size(); i++)
-			if (!cache.get(i).removed)
-				tmp.add(i);
-			else if ((CommonState.getTime() - cache.get(i).timeRemoved) >= TIMEOUT){
-				//System.out.println("TIMEOUT " + CommonState.getTime());
-				cache.get(i).reuseNode();
-				tmp.add(i);
-			}
-
-		int sup = Math.min(dim, tmp.size());
-		for (int i = 0; i < sup; i++){
-			CyclonEntry ce = cache.get((tmp.remove(CommonState.r.nextInt(tmp.size())).intValue()));
-			ce.removeNode(rnode, selectedAtRequest, false);
-			list.add(ce);
-		}
-
-		return list;
-	}
-
-	private List<CyclonEntry> discardEntries(Node n, List<CyclonEntry> list)
-	{
-		int index = 0;
-		List<CyclonEntry> newList = new ArrayList<CyclonEntry>();
-		for (CyclonEntry ce : list)
-			if (!ce.n.equals(n) && (index = indexOf(ce.n)) < 0)
-				newList.add(ce);
-			//Duplicate, take the newest one
-			else if (index >= 0)
-				cache.get(index).age = Math.max(ce.age, cache.get(index).age);
-
-		return newList;
-	}
-
-	private int getFirstDeleted(Node rnode, boolean selectedAtRequest)
-	{
-		for (int i = cache.size()-1 ; i >= 0; i--)
-			if (cache.get(i).removed && cache.get(i).nodeSended.equals(rnode) && cache.get(i).selectedAtRequest == selectedAtRequest)
-				return i;
-
-		return -1;
-	}
-	
-	private int indexOf(Node rnode)
-	{
-		for (int i = cache.size()-1; i >= 0; i--)
-			if (cache.get(i).n.equals(rnode))
-				return i;
-		
-		return -1;
-	}
-
-	private void insertReceivedItems(List<CyclonEntry> list, Node rnode, boolean selectedAtRequest)
-	{
-//		if (CommonState.getNode().getID() == 9784)
-//			System.err.println(rnode.getID() + " " + selectedAtRequest);
-		
-		if (list.isEmpty()){
-			System.err.println("Empty");
-			cache.remove(indexOf(rnode));
-			return;
-		}
-		
-		if (selectedAtRequest)
-			try{
-			cache.set(indexOf(rnode) , new CyclonEntry(list.remove(0)));
-			} catch (Exception e){
-				System.err.println(CommonState.getNode().getID() + " " + rnode.getID());
-				e.printStackTrace();
-			}
-		
-		for (CyclonEntry ce : list){
-			// firstly using empty cache slots
-			if (cache.size() < size)
-				cache.add(new CyclonEntry(ce.n, ce.age));
-			// secondly replacing entries among the ones sent to rnode
-			else{
-				int index = getFirstDeleted(rnode, selectedAtRequest);
-//				if (CommonState.getNode().getID() == 9784){
-//					System.err.println("REPLACE " + cache.get(index).n.getID() + " " + cache.get(index).selectedAtRequest + " " + selectedAtRequest);
-//				}
-//				if (index < 0){
-//					System.err.println("PROBLEM " + CommonState.getNode().getID() + " " + cache.size() + " " + rnode.getID());
-//					return;
-//				}
-				//cache.set(indexOf(sentList.remove(index)), new CyclonEntry(ce.n, ce.age));
-				if (index > 0)
-					cache.set(index, new CyclonEntry(ce.n, ce.age));
-			}
-		}
-
-		for (CyclonEntry ce : cache){
-			if (ce.nodeSended != null && ce.nodeSended.equals(rnode) && ce.selectedAtRequest == selectedAtRequest){
-//				if (CommonState.getNode().getID() == 9784)
-//					System.err.println("REUSE " + ce.n.getID());
-				ce.reuseNode();
-			}
-		}
-	}
-	//-------------------------------------------------------------------
-
-
-	public Object clone()
-	{
+	@Override
+	public Object clone() {
 		Cyclon cyclon = null;
-		try { cyclon = (Cyclon) super.clone(); }
-		catch( CloneNotSupportedException e ) {} // never happens
-		cyclon.cache = new ArrayList<CyclonEntry>();
+		try {
+			cyclon = (Cyclon) super.clone();
+		} catch (CloneNotSupportedException e) {
+		} // never happens
+		cyclon.cache = new ArrayList<CyclonEntry>(20);
 
 		return cyclon;
 	}
 
-	public boolean addNeighbor(Node neighbour)
-	{
-		if (contains(neighbour))
-			return false;
+	@Override
+	public void nextCycle(Node node, int protocolID) {
 
-		if (cache.size() >= size)
-			return false;
+		/* 1. Increment the age of all neighbours */
+		incrementAges();
 
-		CyclonEntry ce = new CyclonEntry(neighbour, CommonState.getTime());
-		cache.add(ce);
+		/* 2. Select Q (oldest neighbour) and l-1 other random nodes from cache */
+		/* 3. Replace Q's entry with P (age 0) */
+		ArrayList<CyclonEntry> subset = addPtoSubset(node);
+		ArrayList<CyclonEntry> subsetToSend = addRandomNeighbours(subset, shufflelenght - 1);
 
-		return true;
+		/* 4. Send the updated subset to Q */
+		/* 5. Receive from Q a subset of no more that i of its own entries */
+		ArrayList<CyclonEntry> subsetToIntegrate = sendSubsetToQ(subsetToSend,protocolID);
+
+		
+
+		/* 6. Discard entries pointing at P and entries already contained in P’s cache. 7. Update P’s cache to
+		 * include all remaining entries, by firstly using empty cache slots (if any), and secondly replacing entries
+		 * among the ones sent to Q. */
+		integrateNeighbours(node, subsetToIntegrate, subsetToSend);
+
+		System.out.println("Cache-Size: " + cache.size());
+
 	}
 
-	public boolean contains(Node neighbour)
-	{
-		for (CyclonEntry ne : cache)
-			if (ne.n.equals(neighbour))
-				return true;
+	private void incrementAges() {
+		if (cache.isEmpty()) return;
+		CyclonEntry maxAgeEntry = null;
+		long maxAge = 0;				
+		for (CyclonEntry entry : cache){
+			entry.age++;
+			if (entry.age > maxAge) {
+				maxAge = entry.age;
+				maxAgeEntry = entry;
+			}
+		}
+		this.maxAgeEntry = maxAgeEntry;
+	}
 
+	private ArrayList<CyclonEntry> addPtoSubset(Node self) {
+		ArrayList<CyclonEntry> subset = new ArrayList<CyclonEntry>(shufflelenght);
+
+		/* remove Q from cache */
+		cache.remove(this.maxAgeEntry);
+
+		/* add P (self) to subset */
+		subset.add(new CyclonEntry(self, 0));
+		return subset;
+	}
+
+	private ArrayList<CyclonEntry> addRandomNeighbours(ArrayList<CyclonEntry> subset, int length) {
+
+		Random random = new Random();
+		int neighborsToSelect = Math.min(cache.size(), length);
+		for (int i = 0; i < neighborsToSelect; i++) {
+			subset.add(cache.get(random.nextInt(cache.size())));
+		}
+
+		assert subset.size() <= shufflelenght : "subset().size > shufflelength in addRandomNeighbours";
+
+		return subset;
+	}
+
+	/*
+	 * Like in basic shuffling, the receiving node Q replies by sending back a random subset of at most l of its
+	 * neighbors, and updates its own cache to accommodate all received entries. It does not increase, though, any
+	 * entry’s age until its own turn comes to initiate a shuffle.
+	 */
+	private ArrayList<CyclonEntry> sendSubsetToQ(ArrayList<CyclonEntry> subset, int protocolID) {
+		if (this.maxAgeEntry != null && this.maxAgeEntry.node.isUp()) {
+			Cyclon q = (Cyclon) this.maxAgeEntry.node.getProtocol(protocolID);
+			return q.receiveSubset(subset);
+		}
+		return new ArrayList(0);
+	}
+
+	public ArrayList<CyclonEntry> receiveSubset(ArrayList<CyclonEntry> subsetReceived) {
+		ArrayList<CyclonEntry> subsetToSend = addRandomNeighbours(new ArrayList<CyclonEntry>(shufflelenght), shufflelenght);
+		integrateNeighbours(subsetReceived, subsetToSend);
+		return subsetToSend; 
+	}
+
+	private void integrateNeighbours(ArrayList<CyclonEntry> subsetReceived, ArrayList<CyclonEntry> subsetSent) {
+		Node dummy = new GeneralNode("dymmy");
+		integrateNeighbours(dummy, subsetReceived, subsetSent);
+	}
+	
+	private void integrateNeighbours(Node self, ArrayList<CyclonEntry> subsetReceived, ArrayList<CyclonEntry> subsetSent) {
+
+		if (!subsetSent.isEmpty() && subsetSent.get(0).node.equals(self))
+			subsetSent.remove(0);
+		if (subsetReceived.isEmpty()) return;
+		for (CyclonEntry entryToInsert : subsetReceived){
+			if (!entryToInsert.node.equals(self) && !cacheContainsNode(entryToInsert.node)) {
+				if (cache.size() < cacheSize)
+					cache.add(entryToInsert);
+				else {
+					CyclonEntry entryToRemove = subsetSent.remove(0);
+					int sizeBefore = cache.size();
+					cache.remove(entryToRemove);
+					assert cache.size() == sizeBefore-1 : "removal problem";
+					cache.add(entryToInsert);
+				}
+			}
+			assert cache.size() <= cacheSize : "cache.size(): " + cache.size() + "  > cacheSize: " + cacheSize + " in integrateNeighbours";
+		}
+	}
+	
+	private boolean cacheContainsNode(Node n){
+		for (CyclonEntry entry : cache){
+			if (entry.node.equals(n))
+				return true;
+		}
 		return false;
 	}
 
-	public int degree()
-	{
+
+
+	/* implementing Linkable */
+
+	@Override
+	public int degree() {
 		return cache.size();
 	}
 
-	public Node getNeighbor(int i)
-	{
-		return cache.get(i).n;
+	@Override
+	public Node getNeighbor(int i) {
+		return cache.get(i).node;
 	}
 
-	public void pack() {}
-
-	public void onKill() {}
-
-	public void processEvent(Node node, int pid, Object event)
-	{
-		CyclonMessage message = (CyclonMessage) event;
-
-		List<CyclonEntry> nodesToSend = null;
-		if (message.isRequest){
-			nodesToSend = selectNeighbors(message.list.size(), message.sender, false);
-
-			CyclonMessage msg = new CyclonMessage(node, nodesToSend, false);
-			Transport tr = (Transport) node.getProtocol(tid);
-			tr.send(node, message.sender, msg, pid);
-			
-//			if (node.getID() == 9784){
-//				System.err.println(message.isResuest + " SEND " + message.node.getID());
-//				for (CyclonEntry ce1 : nodesToSend){
-//					if (ce1.removed)
-//						System.err.print(ce1.n.getID() + "," + ce1.nodeSended.getID() + " " + ce1.removed + " ");
-//				}
-//				System.err.println();
-//			}
-		}
-
-		// 5. Discard entries pointing to P, and entries that are already in P’s cache.
-	 	List<CyclonEntry> list = discardEntries(node, message.list);
-
-		// 6. Update P’s cache to include all remaining entries, by firstly using empty
-		//    cache slots (if any), and secondly replacing entries among the ones originally
-		//    sent to Q.
-
-//		if (node.getID() == 9784){
-//			System.err.println(message.isResuest + " P " + message.node.getID());
-//			for (CyclonEntry ce1 : cache){
-//				if (ce1.removed)
-//					System.err.print(ce1.n.getID() + "," + ce1.nodeSended.getID() + " " + ce1.removed + " ");
-//			}
-//			System.err.println();
-//		}
-
-		insertReceivedItems(list, message.sender, !message.isRequest);
-
-//		if (node.getID() == 9784){//480
-//			for (CyclonEntry ce1 : cache){
-//				if (ce1.removed)
-//					System.err.print(ce1.n.getID() + "," + ce1.nodeSended.getID() + " " + ce1.removed + " ");
-//			}
-//			System.err.println("XX\n" + cache.size());
-//		}
-
-		// 1. Increase by one the age of all neighbors.
-		increaseAgeAndSort();
+	@Override
+	public boolean addNeighbor(Node neighbour) {
+		boolean ret = cache.add(new CyclonEntry(neighbour, 0));
+		return ret;
 	}
 
-	public void nextCycle(Node node, int protocolID)
-	{
-		// 1. Increase by one the age of all neighbors.
-		//increaseAgeAndSort();
+	@Override
+	public boolean contains(Node neighbor) {
+		return cacheContainsNode(neighbor);
+	}
 
-		// 2. Select neighbor Q with the highest age among all neighbors...
-		CyclonEntry ce = selectNeighbor();
-		if (ce == null){
-			System.err.println(node.getID() + ": no Peer");
-			return;
-		}
-		ce.removeNode(ce.n, true, true);
-		
-		//    and l − 1 other random neighbors.
-		List<CyclonEntry> nodesToSend = selectNeighbors(l-1, ce.n, true);
+	@Override
+	public void pack() {
 
-		// 3. Replace Q’s entry with a new entry of age 0 and with P’s address.
-		nodesToSend.add(0, new CyclonEntry(node, CommonState.getTime()));
+	}
 
-		// 4. Send the updated subset to peer Q.
-		CyclonMessage message = new CyclonMessage(node, nodesToSend, true);
-		Transport tr = (Transport) node.getProtocol(tid);
-		tr.send(node, ce.n, message, protocolID);
+	/* implementing Cleanable */
+
+	@Override
+	public void onKill() {
+		maxAgeEntry = null;
+		cache = null;
 	}
 	
-	public String toString()
-	{
-		String s = "[";
-		for (CyclonEntry ce : cache)
-			s += "(" + ce.n.getID() + "," + ce.age + ")";
-		s += "]";
-		return s;
-	}
+
+	
+
+
+
 }

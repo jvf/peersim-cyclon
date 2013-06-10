@@ -1,4 +1,4 @@
-package example.reports;
+package example.cyclonSN;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -71,13 +71,22 @@ public class DegreeObserver implements Control
 		IncrementalStats is = new IncrementalStats();
 
 		for (int i = 0; i < Network.size(); i++){
-			System.out.println(CommonState.getTime() + " " + name + ": InDegree " + entry[i].indegree);
+//			System.out.println(CommonState.getTime() + " " + name + ": InDegree " + entry[i].indegree);
 			is.add(entry[i].indegree);
 		}
 
-		System.out.println(CommonState.getIntTime() + " " + name + ": size " + Network.size() + " " + is);
-		if (dead)
-			System.out.println(CommonState.getIntTime() + " " + name + ": dead " + degreeToDead + " referred " + referredDeadNode.size());
+		System.out.print(CommonState.getIntTime() + " " + name + ": ");
+		System.out.print("size " + Network.size()+ " ");
+		System.out.print("min: " + is.getMin() + " ");
+		System.out.print("max: " + is.getMax() + " ");
+		System.out.print("avg: " + is.getAverage() + " ");
+		System.out.print("variance: " + is.getVar() + " ");
+		System.out.println();
+//		System.out.print("" + is + " ");
+
+//		System.out.println(CommonState.getIntTime() + " " + name + ": size " + Network.size() + " " + is);
+//		if (dead)
+//			System.out.println(CommonState.getIntTime() + " " + name + ": dead " + degreeToDead + " referred " + referredDeadNode.size());
 
 		return false;
 	}
