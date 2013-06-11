@@ -23,6 +23,9 @@ public class Cyclon implements CDProtocol, Linkable, Cloneable, Cleanable {
 	private ArrayList<CyclonEntry> cache;
 	private CyclonEntry maxAgeEntry;
 
+	private boolean firstCycle = true;
+	private Node mySelf;
+
 	public Cyclon(String prefix) {
 		this.maxCacheSize = Configuration.getInt(prefix + "." + PAR_CACHESIZE, 20);
 		this.shufflelenght = Configuration.getInt(prefix + "." + PAR_SHUFFLELENGHT, 20);
@@ -44,24 +47,34 @@ public class Cyclon implements CDProtocol, Linkable, Cloneable, Cleanable {
 	@Override
 	public void nextCycle(Node node, int protocolID) {
 
-		/* 1. Increment the age of all neighbours */
-		incrementAges();
+		if (firstCycle){
+			this.mySelf = node;
+			firstCycle = false;
+		} else {
+			/* 1. Increment the age of all neighbours */
+			incrementAges();
 
-		/* 2. Select Q (oldest neighbour) and l-1 other random nodes from cache */
-		/* 3. Replace Q's entry with P (age 0) */
-		ArrayList<CyclonEntry> subset = addPtoSubset(node);
-		ArrayList<CyclonEntry> subsetToSend = addRandomNeighbours(subset, shufflelenght - 1);
+			CyclonEntry entry = this.maxAgeEntry;
 
-		/* 4. Send the updated subset to Q */
-		/* 5. Receive from Q a subset of no more that i of its own entries */
-		ArrayList<CyclonEntry> subsetToIntegrate = sendSubsetToQ(subsetToSend, protocolID);
+			/* 2. Select Q (oldest neighbour) and l-1 other random nodes from cache */
+			/* 3. Replace Q's entry with P (age 0) */
+			ArrayList<CyclonEntry> subset = addPtoSubset(node);
+			ArrayList<CyclonEntry> subsetToSend = addRandomNeighbours(subset, shufflelenght - 1);
 
-		/*
-		 * 6. Discard entries pointing at P and entries already contained in P’s cache. 7. Update P’s cache to include
-		 * all remaining entries, by firstly using empty cache slots (if any), and secondly replacing entries among the
-		 * ones sent to Q.
-		 */
-		integrateNeighboursP(node, subsetToIntegrate, subsetToSend);
+			/* 4. Send the updated subset to Q */
+			/* 5. Receive from Q a subset of no more that i of its own entries */
+			ArrayList<CyclonEntry> subsetToIntegrate = sendSubsetToQ(subsetToSend, protocolID);
+
+			/*
+			 * 6. Discard entries pointing at P and entries already contained in P’s cache. 7. Update P’s cache to include
+			 * all remaining entries, by firstly using empty cache slots (if any), and secondly replacing entries among the
+			 * ones sent to Q.
+			 */
+			integrateNeighboursP(node, subsetToIntegrate, subsetToSend);
+
+			if (cache.isEmpty())
+				cache.add(entry);
+		}
 
 	}
 
@@ -137,7 +150,7 @@ public class Cyclon implements CDProtocol, Linkable, Cloneable, Cleanable {
 			return;
 
 		for (CyclonEntry entryToInsert : subsetReceived) {
-			if (!cacheContainsNode(entryToInsert.node)) {
+			if (!cacheContainsNode(this.mySelf) && !cacheContainsNode(entryToInsert.node)) {
 				if (cache.size() < maxCacheSize)
 					cache.add(entryToInsert);
 				else {
