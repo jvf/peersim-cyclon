@@ -1,5 +1,7 @@
 package example.cyclon;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -25,10 +27,12 @@ public class IndegreeObserver implements Control {
 	private final static String PAR_PID = "protocol";
 		
 	private Map<Long, Integer> indegreeMap = new HashMap<Long, Integer>();
+	private final String name;
 	private int pid;
 	private int deadcnt;
 	
 	public IndegreeObserver(String prefix){
+		this.name = prefix;
 		this.pid = Configuration.getPid(prefix + "." + PAR_PID);
 		deadcnt = 0;
 	}
@@ -61,18 +65,47 @@ public class IndegreeObserver implements Control {
 				deadcnt++;
 			}
 		}
+
+		ArrayList<Integer> values = new ArrayList<Integer>();
+
 		// now use IncrementalStats for - well - statistics
 		IncrementalStats stats = new IncrementalStats();
 		for(Entry<Long, Integer> e : indegreeMap.entrySet()){
 			stats.add(e.getValue());
+			values.add(e.getValue());
 		}
-		
-		// TODO create histogram
-		
+
+		/* quartiles (4-quantiles) */
+		int max = (int) stats.getMax();
+		int onequarter = max/4;
+		ArrayList<Integer> q1 = new ArrayList<Integer>(onequarter+1);
+		ArrayList<Integer> q2 = new ArrayList<Integer>(onequarter+1);
+		ArrayList<Integer> q3 = new ArrayList<Integer>(onequarter+1);
+		ArrayList<Integer> q4 = new ArrayList<Integer>(onequarter+1);
+
+		for (Integer value : values){
+			if (value < onequarter)
+				q1.add(value);
+			else if (value < 2*onequarter)
+				q2.add(value);
+			else if (value < 3*onequarter)
+				q3.add(value);
+			else
+				q4.add(value);
+		}
+
+
+		/* print histogram */
+		System.out.println(name + ":  " + CommonState.getIntTime() +
+				"  q1: " + q1.size() +
+				"  q2: " + q2.size() +
+				"  q3: " + q3.size() +
+				"  q4: " + q4.size());
+
 		// Output
-		System.out.println(CommonState.getIntTime() + " " + Network.size()
-				+ " " + deadcnt + " " + stats.getMin() + " " + stats.getMax()
-				+ " " + stats.getAverage());
+//		System.out.println(name + ":  " + CommonState.getIntTime() + "  size: " + Network.size()
+//				+ "  deadcnt: " + deadcnt + "  min: " + stats.getMin() + "  max: " + stats.getMax()
+//				+ "  avg: " + stats.getAverage() + "  mincnt: " + stats.getMinCount() + "  maxcnt: " + stats.getMaxCount());
 		return false;
 	}
 
