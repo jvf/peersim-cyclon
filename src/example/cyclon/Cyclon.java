@@ -6,6 +6,7 @@ import java.util.Random;
 import peersim.cdsim.CDProtocol;
 import peersim.config.Configuration;
 import peersim.core.Cleanable;
+import peersim.core.CommonState;
 import peersim.core.Linkable;
 import peersim.core.Node;
 
@@ -47,35 +48,47 @@ public class Cyclon implements CDProtocol, Linkable, Cloneable, Cleanable {
 	@Override
 	public void nextCycle(Node node, int protocolID) {
 
-		if (firstCycle){
+		/* Initialisation phase
+		 *
+		 * CommenState.getNode() returns the note currently executing
+		 * nextCycle(). For the methods executed in the logical context of Q we
+		 * need to know the ID of Q. Therefore we need to initialize 'mySelf' in
+		 * cycle 0.
+		 */
+		if (CommonState.getIntTime() == 0) {
 			this.mySelf = node;
-			firstCycle = false;
 		} else {
-			/* 1. Increment the age of all neighbours */
-			incrementAges();
-
-			CyclonEntry entry = this.maxAgeEntry;
-
-			/* 2. Select Q (oldest neighbour) and l-1 other random nodes from cache */
-			/* 3. Replace Q's entry with P (age 0) */
-			ArrayList<CyclonEntry> subset = addPtoSubset(node);
-			ArrayList<CyclonEntry> subsetToSend = addRandomNeighbours(subset, shufflelenght - 1);
-
-			/* 4. Send the updated subset to Q */
-			/* 5. Receive from Q a subset of no more that i of its own entries */
-			ArrayList<CyclonEntry> subsetToIntegrate = sendSubsetToQ(subsetToSend, protocolID);
-
-			/*
-			 * 6. Discard entries pointing at P and entries already contained in P’s cache. 7. Update P’s cache to include
-			 * all remaining entries, by firstly using empty cache slots (if any), and secondly replacing entries among the
-			 * ones sent to Q.
-			 */
-			integrateNeighboursP(node, subsetToIntegrate, subsetToSend);
-
-			if (cache.isEmpty())
-				cache.add(entry);
+			shuffle(node, protocolID);
 		}
 
+	}
+
+	private void shuffle(Node node, int protocolID) {
+
+		/* 1. Increment the age of all neighbours */
+		incrementAges();
+
+		CyclonEntry entry = this.maxAgeEntry;
+
+		/* 2. Select Q (oldest neighbour) and l-1 other random nodes from cache */
+		/* 3. Replace Q's entry with P (age 0) */
+		ArrayList<CyclonEntry> subset = addPtoSubset(node);
+		ArrayList<CyclonEntry> subsetToSend = addRandomNeighbours(subset, shufflelenght - 1);
+
+		/* 4. Send the updated subset to Q */
+		/* 5. Receive from Q a subset of no more that i of its own entries */
+		ArrayList<CyclonEntry> subsetToIntegrate = sendSubsetToQ(subsetToSend, protocolID);
+
+		/*
+		 * 6. Discard entries pointing at P and entries already contained in P’s
+		 * cache. 7. Update P’s cache to include all remaining entries, by
+		 * firstly using empty cache slots (if any), and secondly replacing
+		 * entries among the ones sent to Q.
+		 */
+		integrateNeighboursP(node, subsetToIntegrate, subsetToSend);
+
+		if (cache.isEmpty())
+			cache.add(entry);
 	}
 
 	private void incrementAges() {
@@ -144,32 +157,7 @@ public class Cyclon implements CDProtocol, Linkable, Cloneable, Cleanable {
 	}
 
 	private void integrateNeighboursQ(ArrayList<CyclonEntry> subsetReceived, ArrayList<CyclonEntry> subsetSent) {
-
-		/* should only be the case if sending failed */
-		if (subsetReceived.isEmpty())
-			return;
-
-		for (CyclonEntry entryToInsert : subsetReceived) {
-			if (!cacheContainsNode(this.mySelf) && !cacheContainsNode(entryToInsert.node)) {
-				if (cache.size() < maxCacheSize)
-					cache.add(entryToInsert);
-				else {
-					CyclonEntry entryToRemove = subsetSent.remove(0);
-					
-					/*
-					 * There are cases, where the old neighbour from the subsetSent is not found in the current cache.
-					 * That should not be the case! 
-					 * Dirty fix: Only add new neighbour if the removal of a sent neighbour was successful. 
-					 * ToDo: find out why there are neighbours who in the subsetSent which are not in the cache 
-					 */
-					if (cache.remove(entryToRemove))
-						cache.add(entryToInsert);
-				}
-			}
-			assert cache.size() <= maxCacheSize : "cache.size(): " + cache.size() + "  > maxCacheSize: " + maxCacheSize
-					+ " in integrateNeighbours";
-		}
-
+		integrateNeighbours(this.mySelf, subsetReceived, subsetSent);
 	}
 
 	private void integrateNeighboursP(Node self, ArrayList<CyclonEntry> subsetReceived,
@@ -178,6 +166,12 @@ public class Cyclon implements CDProtocol, Linkable, Cloneable, Cleanable {
 		/* remove self from the subsentSent, because self will never be in the cache */
 		if (!subsetSent.isEmpty() && subsetSent.get(0).node.equals(self))
 			subsetSent.remove(0);
+
+		integrateNeighbours(self, subsetReceived, subsetSent);
+	}
+
+	private void integrateNeighbours(Node self, ArrayList<CyclonEntry> subsetReceived,
+									 ArrayList<CyclonEntry> subsetSent) {
 
 		/* should only be the case if sending failed */
 		if (subsetReceived.isEmpty())
@@ -188,16 +182,29 @@ public class Cyclon implements CDProtocol, Linkable, Cloneable, Cleanable {
 				if (cache.size() < maxCacheSize)
 					cache.add(entryToInsert);
 				else {
-					
-					/* see above */
+
+					/*
+					 * There are cases, where the old neighbour from the subsetSent is not found in the current cache.
+					 * That should not be the case!
+					 * Dirty fix: Trim cache back to maxCacheSize after adding all the nodes
+					 * ToDo: find out why there are neighbours who in the subsetSent which are not in the cache
+					 */
 					CyclonEntry entryToRemove = subsetSent.remove(0);
-					if (cache.remove(entryToRemove))
-						cache.add(entryToInsert);
+//					if (cache.remove(entryToRemove))
+					cache.remove(entryToRemove);
+					cache.add(entryToInsert);
 				}
 			}
-			assert cache.size() <= maxCacheSize : "cache.size(): " + cache.size() + "  > maxCacheSize: " + maxCacheSize
-					+ " in integrateNeighbours";
 		}
+		/* remove random notes if the cache is to big, see above */
+		Random random = new Random();
+		while (cache.size() > maxCacheSize){
+			cache.remove(random.nextInt(cache.size()));
+		}
+
+		assert cache.size() <= maxCacheSize : "cache.size(): " + cache.size() + "  > maxCacheSize: " + maxCacheSize
+				+ " in integrateNeighbours";
+
 	}
 
 

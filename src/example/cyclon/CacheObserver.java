@@ -31,8 +31,8 @@ public class CacheObserver implements Control {
 
 		System.out.print(name + ":  ");
 		System.out.print("time: " +  peersim.core.CommonState.getTime() + "  ");
-		System.out.print("min: " + is.getMin() + "  ");
-		System.out.print("max: " + is.getMax() + "  ");
+//		System.out.print("min: " + is.getMin() + "  ");
+//		System.out.print("max: " + is.getMax() + "  ");
 		System.out.print("avg: " + is.getAverage() + " ");
 		System.out.println();
 
